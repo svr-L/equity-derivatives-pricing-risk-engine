@@ -1,6 +1,6 @@
 # Equity Derivatives Pricing Engine
 
-**Standalone Python library — v0.1.0, first tested milestone.**
+**Standalone Python library — v0.1.0.**
 
 Unified risk-neutral Monte Carlo pricing for equity options, with Heston
 stochastic variance, European/Asian/lookback/barrier payoffs, antithetic
