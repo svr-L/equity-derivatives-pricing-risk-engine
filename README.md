@@ -85,15 +85,13 @@ docs/PROVENANCE.md
 
 - **v0.1 (this release):** independently installable research core, vanilla
   numerical benchmarks, discrete-monitoring exotics, Monte Carlo statistics.
-- **v0.2 proposed:** robust Andersen QE / QE-M or other verified second
+- **v0.2:** robust Andersen QE / QE-M or other verified second
   scheme, convergence diagnostics, independent barrier benchmarks, performance
   and memory profiling, conditional bridge approximation documented for Heston.
-- **v0.3 proposed:** calibration of Heston to vanilla *prices/IV* with
+- **v0.3:** calibration of Heston to vanilla *prices/IV* with
   arbitrage/data checks and parameter-identifiability diagnostics.
-- **v0.4 proposed:** production-quality risk surface scenarios and explicit
+- **v0.4:** production-quality risk surface scenarios and explicit
   sticky-parameter vs recalibrated-market-IV Greek conventions.
-
-This roadmap is a **proposal**, not a silently adopted architectural change.
 
 ## Validation record
 
