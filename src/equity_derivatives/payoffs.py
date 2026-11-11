@@ -76,9 +76,12 @@ class Barrier:
     direction: str = "up"  # "up" or "down"
     knock: str = "out"  # "out" or "in"
     is_call: bool = True
+    monitoring: str = "discrete"  # or "continuous_bridge" (conditional approximation)
 
     def __post_init__(self) -> None:
         _validate_strike(self.strike)
+        if self.monitoring not in ("discrete", "continuous_bridge"):
+            raise ValueError("monitoring must be discrete or continuous_bridge")
         if not np.isfinite(self.barrier) or self.barrier <= 0:
             raise ValueError("barrier must be strictly positive")
         if self.direction not in ("up", "down"):
@@ -87,11 +90,11 @@ class Barrier:
             raise ValueError("knock must be in/out")
 
     def evaluate(self, spot_paths: NDArray[np.float64]) -> NDArray[np.float64]:
-        """Discrete monitoring at each simulation node INCLUDING t=0.
+        """Payoff observed on the simulation grid (including t=0).
 
-        A touch equal to the barrier counts as a hit. No continuous-monitoring
-        bridge correction is used in v0.1, so 'out' prices are typically high
-        relative to continuously monitored barrier contracts.
+        For monitoring="continuous_bridge", this *standalone* evaluate method
+        still returns the grid-monitored payoff. Use price_mc() to apply the
+        conditional-crossing bridge approximation with HestonPaths variance.
         """
         _assert_paths(spot_paths)
         hit = np.any(spot_paths >= self.barrier, axis=0) if self.direction == "up" else (

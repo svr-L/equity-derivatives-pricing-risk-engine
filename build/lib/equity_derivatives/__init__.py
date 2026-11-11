@@ -1,0 +1,18 @@
+"""Equity derivatives pricing engine, version 0.2.0."""
+from .heston_fourier import heston_european, heston_log_return_cf
+from .barrier_bridge import barrier_survival_probabilities
+from .barrier_reference import black_scholes_barrier
+from .greeks import BumpGreeks, bump_greeks
+from .models import EquityMarket, HestonParams, MCConfig
+from .payoffs import ArithmeticAsian, Barrier, European, FixedStrikeLookback
+from .pricing import PriceResult, price_mc
+from .simulation import HestonPaths, NormalShocks, sample_shocks, simulate_heston
+from .vanilla import black76_forward, black_scholes, black_vega, implied_vol
+
+__all__ = [
+    "black_scholes_barrier", "barrier_survival_probabilities",
+    "EquityMarket", "HestonParams", "MCConfig", "European", "ArithmeticAsian",
+    "FixedStrikeLookback", "Barrier", "HestonPaths", "NormalShocks", "sample_shocks",
+    "simulate_heston", "price_mc", "PriceResult", "bump_greeks", "BumpGreeks",
+    "heston_european", "heston_log_return_cf", "black76_forward", "black_scholes", "black_vega", "implied_vol",
+]

@@ -1,4 +1,4 @@
-# Provenance and interoperability (v0.1)
+# Provenance and interoperability (v0.2)
 
 The new repository is **standalone**. It neither imports from nor changes the
 following user-supplied archives:
@@ -16,7 +16,9 @@ MIT license are retained in this repository.
 The product-level architecture and the distinction between continuous and
 discrete barrier observation are informed by `fx_pricing/barriers.py`, but
 no FX-specific barrier formula was copied. The MC payoff implementations
-and Heston Fourier simulation/pricing were developed afresh.
+and Heston Fourier simulation/pricing were developed afresh. The v0.2
+Andersen QE-M discretization, conditional barrier weighting, reflection
+benchmark and tests were added as new standalone code, not copied from FX/FI.
 
 **Compatibility note:** The provided FX v0.2.0 declares `fi-pricing>=1.0.0`
 and imports `fi_pricing.options`. The provided FI v0.13.0 instead exposes its

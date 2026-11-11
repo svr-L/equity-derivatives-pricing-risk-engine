@@ -56,6 +56,7 @@ class MCConfig:
     n_paths: int = 20_000
     seed: int = 42
     antithetic: bool = True
+    scheme: str = "full_truncation_euler"  # or "qe_m" (Andersen QE martingale correction)
 
     def __post_init__(self) -> None:
         _finite(maturity=self.maturity)
@@ -69,3 +70,5 @@ class MCConfig:
             raise ValueError("antithetic requires an even n_paths >= 4 for a defined SE")
         if isinstance(self.seed, bool) or not isinstance(self.seed, int) or self.seed < 0:
             raise ValueError("seed must be a nonnegative integer")
+        if self.scheme not in ("full_truncation_euler", "qe_m"):
+            raise ValueError("scheme must be full_truncation_euler or qe_m")
