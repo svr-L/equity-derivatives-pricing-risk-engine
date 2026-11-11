@@ -129,16 +129,12 @@ docs/
   discrete exotics, CRN bump risks).
 - **v0.2.0 (current):** QE-M scheme, conditional barrier bridge, independent
   Black-Scholes continuous-barrier benchmark, expanded tests and experiments.
-- **v0.3 proposed, not implemented:** vanilla-market IV/price surface
+- **v0.3, not implemented:** vanilla-market IV/price surface
   calibration, quote-quality/no-arbitrage checks, fit and identifiability
   diagnostics, optional fixture data.
-- **v0.4 proposed, not implemented:** expanded sensitivity conventions
+- **v0.4, not implemented:** expanded sensitivity conventions
   (sticky model parameters vs recalibrated surface risk), scenario and
   portfolio-risk outputs.
-
-The new repository uses the distribution name
-**`equity-derivatives-pricing-risk-engine`**. The Python import namespace is
-unchanged and the original FX and FI repositories remain untouched.
 
 ## License / upstream provenance
 
