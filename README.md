@@ -1,109 +1,147 @@
-# Equity Derivatives Pricing Engine
+# Equity Derivatives Pricing & Risk Engine
 
-**Standalone Python library — v0.1.0.**
+**Standalone Python research library — v0.2.0.**
 
-Unified risk-neutral Monte Carlo pricing for equity options, with Heston
-stochastic variance, European/Asian/lookback/barrier payoffs, antithetic
-variance reduction, CRN bump Greeks, Black-Scholes/Black-76 plus Heston Fourier
-European benchmarks. No dependency on the separate FX or fixed-income packages.
+A unified equity-derivatives numerical core with Heston stochastic variance,
+European/Asian/lookback/barrier payoffs, two Monte Carlo schemes, paired
+antithetics, common-random-number Greeks and independent vanilla/barrier
+Black-Scholes benchmarks. Version 0.2 adds **Andersen QE-M** and **conditional
+Brownian-bridge barrier survival weighting**.
 
-> Scope is intentionally explicit: this is an *initial numerical library*,
-> not yet a full calibrated market-production engine. See
-> [methodology and limitations](docs/METHODOLOGY.md).
+**Important:** QE-M is a discretization, not exact Heston simulation. The
+continuous-barrier correction is **exact conditional on endpoints for constant
+Black-Scholes volatility** but is **only approximate for stochastic Heston
+variance**. No market-surface calibration, portfolio hedging P&L or certified
+production accuracy is claimed.
 
-## Install
+## Installation
 
-From the repository root:
+Python >=3.10, NumPy >=1.26, SciPy >=1.11:
 
 ```bash
 python -m pip install -e '.[dev]'
 pytest -q
 python examples/price_exotics.py
+python examples/compare_schemes.py
+python examples/barrier_validation.py
+python examples/heston_barrier_grid.py
 ```
 
-Core requirements: Python >=3.10, NumPy, SciPy. No external data connection.
+From a standalone wheel, `pip install dist/*.whl`. The import name remains
+**`equity_derivatives`**, unchanged from v0.1. **Neither FX nor FI pricing
+repositories are modified or required.** Because the distribution name has
+changed while the import name has not, use a fresh virtual environment or
+uninstall the old `equity-derivatives-pricing-engine` distribution before
+installing v0.2; do not install both into the same environment.
 
-## Minimal usage
+## First pricing example
 
 ```python
 from equity_derivatives import (
-    EquityMarket, HestonParams, MCConfig,
-    European, ArithmeticAsian, FixedStrikeLookback, Barrier,
-    price_mc, heston_european, implied_vol, bump_greeks,
+    EquityMarket, HestonParams, MCConfig, European, ArithmeticAsian,
+    FixedStrikeLookback, Barrier, price_mc, heston_european,
+    black_scholes_barrier, bump_greeks,
 )
 
 market = EquityMarket(spot=100, rate=0.01, dividend_yield=0.02)
-heston = HestonParams(kappa=2.0, theta=0.04, xi=0.5, rho=-0.7, v0=0.04)
-mc = MCConfig(maturity=1.0, n_steps=252, n_paths=20_000,
-              antithetic=True, seed=2026)
+params = HestonParams(kappa=2.0, theta=0.04, xi=0.5, rho=-0.7, v0=0.04)
+mc = MCConfig(maturity=1.0, n_steps=96, n_paths=20_000,
+              seed=2026, antithetic=True, scheme="qe_m")
 
-for product in (
+products = (
     European(100),
     ArithmeticAsian(100),
     FixedStrikeLookback(100),
-    Barrier(strike=100, barrier=125, direction="up", knock="out"),
-):
-    result = price_mc(market, heston, product, mc)
-    print(type(product).__name__, result.price, result.stderr)
+    Barrier(100, 125, direction="up", knock="out",
+            monitoring="continuous_bridge"),
+)
+for product in products:
+    result = price_mc(market, params, product, mc)
+    print(type(product).__name__, round(result.price, 4), round(result.stderr, 4))
 
-vanilla = heston_european(market, heston, strike=100, maturity=1.0)
-print("Heston IV:", implied_vol(vanilla, market, 100, 1.0))
-print("Barrier Greeks:", bump_greeks(market, heston,
-                                    Barrier(100, 125), mc))
+print("Heston Fourier European:", heston_european(market, params, 100, 1.0))
+print("Spot/variance Greeks:", bump_greeks(market, params, products[3], mc))
+
+# Independent exact reference exists only for constant-vol Black-Scholes:
+print("BS continuously monitored barrier reference:",
+      black_scholes_barrier(market, products[3], maturity=1.0, vol=0.20))
 ```
 
-## What is validated
+## Supported functionality
 
-- European Black-76 vs equity Black-Scholes with dividends.
-- Inverse Black implied volatility and put-call parity.
-- Heston characteristic function martingale identity, Heston Fourier parity.
-- Heston Fourier vs Black-Scholes when volatility-of-variance is zero.
-- Heston MC European vs Heston Fourier, tolerance allowing sampling/grid error.
-- Antithetic pair-level Monte Carlo standard errors, seed reproducibility.
-- Knock-in + knock-out = European (discrete monitoring, zero rebate).
-- Controlled payoff/monitoring conventions and input validation.
+| Layer | v0.2 functionality | Caveat |
+|---|---|---|
+| Vanilla | Black-Scholes/Black-76, implied Black IV, Heston Fourier | Flat r and q; European exercise |
+| Model | Heston correlated price/variance | Q-dynamics, no jumps |
+| Simulation | Full Truncation Euler (v0.1 default), Andersen **QE-M** | Both time discretized under stochastic variance |
+| Exotics | Arithmetic Asian, fixed-strike lookback, up/down knock-in/out barrier | Grid fixings for Asian/lookback; no rebates |
+| Barrier | Grid monitoring or conditional bridge weights | Continuous bridge approximate for Heston |
+| Risk | CRN spot Delta/Gamma and sensitivity to initial variance `v0` | Not market IV Vega or recalibrated Greeks |
+| Statistics | Antithetics, independent-pair SE, normal CIs | CIs exclude time/grid and model bias |
+| Validation | Fourier vanilla; BS continuous-barrier reflection formula; tests, convergence and runtime demos | Not a substitute for independent model validation |
 
-## Architecture
+`MCConfig.scheme='full_truncation_euler'` and `Barrier.monitoring='discrete'`
+remain the defaults for backwards compatibility with **v0.1**.
+
+## Repository layout
 
 ```text
 src/equity_derivatives/
-    models.py           market, Heston and MC configuration
-    vanilla.py          Black-76 / Black-Scholes / implied vol / Vega
-    heston_fourier.py   semi-analytical vanilla benchmark
-    simulation.py       correlated full-truncation Heston path engine
-    payoffs.py          reusable product payoffs
-    pricing.py          discounted MC estimator + confidence intervals
-    greeks.py           CRN bump Delta, Gamma and dPrice/dv0
-examples/price_exotics.py
-examples/convergence_study.py
+    models.py               market, model and MC configuration
+    simulation.py           FT Euler and Andersen QE-M
+    payoffs.py              payoff definitions and monitoring convention
+    pricing.py              estimator, survival-weighted barriers and CIs
+    barrier_bridge.py       conditional no-touch weights
+    barrier_reference.py    independent exact Black-Scholes barrier benchmark
+    vanilla.py              Black-76 / Black-Scholes / implied vol
+    heston_fourier.py       semi-analytical Heston vanilla
+    greeks.py               CRN bump risks
+examples/
+    price_exotics.py
+    compare_schemes.py
+    barrier_validation.py
+    heston_barrier_grid.py
+    convergence_study.py
 tests/
-docs/METHODOLOGY.md
-docs/PROVENANCE.md
+docs/
+    METHODOLOGY.md
+    VALIDATION.md
+    PROVENANCE.md
+    DESIGN_DECISIONS.md
 ```
 
-## Milestone roadmap (not claims of completed features)
+## Reliability and validation
 
-- **v0.1 (this release):** independently installable research core, vanilla
-  numerical benchmarks, discrete-monitoring exotics, Monte Carlo statistics.
-- **v0.2:** robust Andersen QE / QE-M or other verified second
-  scheme, convergence diagnostics, independent barrier benchmarks, performance
-  and memory profiling, conditional bridge approximation documented for Heston.
-- **v0.3:** calibration of Heston to vanilla *prices/IV* with
-  arbitrage/data checks and parameter-identifiability diagnostics.
-- **v0.4:** production-quality risk surface scenarios and explicit
-  sticky-parameter vs recalibrated-market-IV Greek conventions.
+1. Run `pytest -q` for regressions, variance CIR moment matching, Heston
+   martingale tests, Black-Scholes continuous-barrier reference convergence,
+   and knock-in/out parity.
+2. Run `python examples/compare_schemes.py` to examine MC estimates, standard
+   errors and runtimes **against the independent Heston Fourier price**.
+3. Run `python examples/barrier_validation.py` to compare **constant-vol**
+   bridge results against the analytic continuous-monitoring barrier price.
+4. Read [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md) for derivations,
+   estimator conventions and limitations.
+5. Read [`docs/VALIDATION.md`](docs/VALIDATION.md) for actual local outcomes.
 
-## Validation record
+## Versioned scope / roadmap
 
-See [the validation note](docs/VALIDATION.md) for the test command, a
-reproducible benchmark run and the distinction between sampling and
-time-discretization error.
+- **v0.1.0:** standalone baseline (Full Truncation Euler, vanilla Fourier,
+  discrete exotics, CRN bump risks).
+- **v0.2.0 (current):** QE-M scheme, conditional barrier bridge, independent
+  Black-Scholes continuous-barrier benchmark, expanded tests and experiments.
+- **v0.3 proposed, not implemented:** vanilla-market IV/price surface
+  calibration, quote-quality/no-arbitrage checks, fit and identifiability
+  diagnostics, optional fixture data.
+- **v0.4 proposed, not implemented:** expanded sensitivity conventions
+  (sticky model parameters vs recalibrated surface risk), scenario and
+  portfolio-risk outputs.
 
-## Source-code provenance
+The new repository uses the distribution name
+**`equity-derivatives-pricing-risk-engine`**. The Python import namespace is
+unchanged and the original FX and FI repositories remain untouched.
 
-The pricing conventions in `vanilla.py` are independently adapted from the
-user's existing FX and FI pricing repositories. See
-[PROVENANCE](docs/PROVENANCE.md) for files, version compatibility and license.
-Both source repositories remain **unchanged**.
+## License / upstream provenance
 
-Copyright (c) 2026 Saverio Lauriola. MIT License.
+MIT. [`docs/PROVENANCE.md`](docs/PROVENANCE.md) describes how standalone
+pricing conventions were informed by the independently supplied FX and FI
+pricing packages and why no runtime dependency was introduced.
