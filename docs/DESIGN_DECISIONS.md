@@ -1,4 +1,4 @@
-# Architecture and backward compatibility decisions (v0.2.0)
+# Architecture and backward compatibility decisions (v0.3.0)
 
 These are the explicit decisions applied in **this** release; future design
 changes should be versioned and reviewed rather than silently substituted.
@@ -24,6 +24,13 @@ changes should be versioned and reviewed rather than silently substituted.
 7. **Tracking quality.** Reproducible new tests/experiments and explicit
    limitations accompany every numerical addition.
 
-**Not introduced:** market-data API, arbitrage smoothing, Heston calibration,
+**v0.3 additive extension:** batch Heston Fourier, multi-start calibration
+on European vanilla mids/IVs, archived option snapshot adapters and limited
+strike-arbitrage diagnostics. The existing numerical engine and APIs are
+preserved; the new market-data dependency is optional. American quotes demand
+explicit European-proxy opt-in. Explicit user-supplied rates and dividends
+avoid silently guessed market inputs. Historical Yahoo data are not bundled.
+
+**Not introduced:** full market-data API, arbitrage smoothing,
 local volatility, Bates, early exercise, PCA/smile risk, arbitrary fixings,
 exotic IV, portfolio VaR/ES, hedge P&L or production deployment.

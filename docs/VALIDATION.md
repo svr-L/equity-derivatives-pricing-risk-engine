@@ -99,3 +99,22 @@ is not market IV Vega. Asian and lookback sampling dates depend on the grid.
 Calibration to observed market vanilla option surfaces, hedging, portfolio
 risk analytics, performance tuning and independent QuantLib cross-checks
 are outside v0.2.
+
+
+## v0.3.0 calibration and empirical tests (2026-11-11)
+
+- `python -m pytest -q`: **74 passed** in local environment, preserving all
+  59 v0.2 tests.
+- `python examples/calibrate_synthetic.py`: input `(kappa=2.5, theta=.05,
+  xi=.6, rho=-.65, v0=.045)` recovered by batch-Fourier calibration to
+  independently integrated *same-model* scalar Fourier prices: near
+  `(2.50085,.04999,.59928,-.65053,.04499)`; within-synthetic held-out IV
+  RMSE 0.0036 IV percentage points. This is a numerical recovery test, not
+  real-world model-identification evidence.
+- SPY October 27 CSV proxy fit: train / held-out IV RMSE 0.4003 / 0.4074
+  volatility percentage points, but holdout bid/ask coverage **4.17%** and
+  American/European mismatch. Detailed reproduction in `EMPIRICAL_SPY.md`.
+- Parquet snapshots are supported with optional `pyarrow`, but the local
+  environment could not install it; no latest-Parquet calibration is claimed.
+- No release-level cross-date OOS test, historical curve validation,
+  calibrated exotic market quoting or independent production-grade validation.
