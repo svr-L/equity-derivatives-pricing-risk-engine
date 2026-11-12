@@ -1,143 +1,155 @@
 # Equity Derivatives Pricing & Risk Engine
 
-**Standalone Python research library — v0.2.0.**
+**v0.3.0 — standalone Python research package.** Heston / Black–Scholes
+vanilla pricing, Heston Monte Carlo pricing of Asian, lookback and barrier
+options, Greeks, implied volatility, calibrated European vanilla surfaces,
+source-compatible option-chain snapshot ingestion and numerical validation.
 
-A unified equity-derivatives numerical core with Heston stochastic variance,
-European/Asian/lookback/barrier payoffs, two Monte Carlo schemes, paired
-antithetics, common-random-number Greeks and independent vanilla/barrier
-Black-Scholes benchmarks. Version 0.2 adds **Andersen QE-M** and **conditional
-Brownian-bridge barrier survival weighting**.
-
-**Important:** QE-M is a discretization, not exact Heston simulation. The
-continuous-barrier correction is **exact conditional on endpoints for constant
-Black-Scholes volatility** but is **only approximate for stochastic Heston
-variance**. No market-surface calibration, portfolio hedging P&L or certified
-production accuracy is claimed.
+**This is a numerical research engine, not a production trading system.** A
+successful optimizer run is not proof of a uniquely identified Heston model;
+American ETF options cannot be priced exactly by the European Fourier pricer.
+See [Calibration & limitations](docs/CALIBRATION.md).
 
 ## Installation
 
-Python >=3.10, NumPy >=1.26, SciPy >=1.11:
+Python >=3.10. Pricing core needs NumPy and SciPy. Pandas and PyArrow are
+optional for collector snapshots (PyArrow required for Parquet, not CSV.GZ).
 
 ```bash
-python -m pip install -e '.[dev]'
-pytest -q
+python -m pip install -e '.[dev,marketdata]'
+python -m pytest -q
 python examples/price_exotics.py
 python examples/compare_schemes.py
-python examples/barrier_validation.py
-python examples/heston_barrier_grid.py
+python examples/calibrate_synthetic.py
 ```
 
-From a standalone wheel, `pip install dist/*.whl`. The import name remains
-**`equity_derivatives`**, unchanged from v0.1. **Neither FX nor FI pricing
-repositories are modified or required.** Because the distribution name has
-changed while the import name has not, use a fresh virtual environment or
-uninstall the old `equity-derivatives-pricing-engine` distribution before
-installing v0.2; do not install both into the same environment.
+Install `pip install -e .` for pricing/calibration from pure Python quotes;
+use `pip install -e '.[marketdata]'` for the data adapter. The import name is
+**`equity_derivatives`**, unchanged since v0.1. Previous FX and Fixed Income
+repositories are neither modified nor runtime dependencies. The Python
+distribution name remains `equity-derivatives-pricing-risk-engine` from v0.2.
 
-## First pricing example
+## The new v0.3 calibration layer
+
+- Batch Heston Fourier European call/put prices via shared Gauss–Legendre
+  quadrature, grouping strikes by expiry (additional numerical method with
+  configurable nodes and integration cutoff).
+- Constrained, reproducible multi-start nonlinear least-squares calibration of
+  `(kappa, theta, xi, rho, v0)` to vanilla mids: price RMSE, Vega-scaled price
+  residuals (default), or re-inverted implied-vol residuals.
+- IVs recomputed internally from quoted mids; optional bid/ask based weights,
+  holdout IV/price errors, within-bid/ask coverage, Jacobian condition proxy,
+  optimizer starting-point diagnostics.
+- Optional data adapter for the user's **existing** daily Yahoo option-chain
+  collector: historical CSV.GZ/Parquet or ZIP, deterministic timestamp
+  selection (no reliance on stale `latest` files), quote-quality filters,
+  OTM-by-forward filtering, and strike monotonicity/convexity diagnostics.
+- **Explicit exercise-style control.** For American-style ETF option data,
+  `allow_american_proxy=True` must be specified. The output is labelled as a
+  European proxy; no early-exercise premium is modelled. Flat rate/dividend
+  assumptions must be passed by the caller.
+
+### Minimal synthetic European surface calibration
 
 ```python
+import numpy as np
 from equity_derivatives import (
-    EquityMarket, HestonParams, MCConfig, European, ArithmeticAsian,
-    FixedStrikeLookback, Barrier, price_mc, heston_european,
-    black_scholes_barrier, bump_greeks,
+    EquityMarket, HestonParams, VanillaQuote, CalibrationConfig,
+    heston_surface_prices, calibrate_heston,
 )
-
-market = EquityMarket(spot=100, rate=0.01, dividend_yield=0.02)
-params = HestonParams(kappa=2.0, theta=0.04, xi=0.5, rho=-0.7, v0=0.04)
-mc = MCConfig(maturity=1.0, n_steps=96, n_paths=20_000,
-              seed=2026, antithetic=True, scheme="qe_m")
-
-products = (
-    European(100),
-    ArithmeticAsian(100),
-    FixedStrikeLookback(100),
-    Barrier(100, 125, direction="up", knock="out",
-            monitoring="continuous_bridge"),
-)
-for product in products:
-    result = price_mc(market, params, product, mc)
-    print(type(product).__name__, round(result.price, 4), round(result.stderr, 4))
-
-print("Heston Fourier European:", heston_european(market, params, 100, 1.0))
-print("Spot/variance Greeks:", bump_greeks(market, params, products[3], mc))
-
-# Independent exact reference exists only for constant-vol Black-Scholes:
-print("BS continuously monitored barrier reference:",
-      black_scholes_barrier(market, products[3], maturity=1.0, vol=0.20))
+market = EquityMarket(spot=100, rate=0.02, dividend_yield=0.01)
+truth = HestonParams(kappa=2.5, theta=.05, xi=.6, rho=-.65, v0=.045)
+strikes = np.tile([90., 100., 110.], 3)
+maturities = np.repeat([.25, .75, 1.5], 3)
+prices = heston_surface_prices(market, truth, strikes, maturities)
+quotes = [VanillaQuote(float(k), float(t), float(p))
+          for k,t,p in zip(strikes,maturities,prices)]
+fit = calibrate_heston(market, quotes, config=CalibrationConfig(n_starts=4))
+print(fit.params, fit.market_rmse_iv, fit.jacobian_condition_number)
 ```
 
-## Supported functionality
+For an **independently integrated synthetic** demo with a held-out subset:
 
-| Layer | v0.2 functionality | Caveat |
+```bash
+python examples/calibrate_synthetic.py
+```
+
+### Use the supplied historical Yahoo archive
+
+**The raw data are intentionally not bundled in this GitHub repository.**
+To reproduce an exploratory proxy fit on the archived SPY CSV dated
+2026-10-27, with **illustrative (NOT historically verified) assumptions**
+`r=4%`, `q=1%` (continuously compounded):
+
+```bash
+python examples/calibrate_snapshot.py 'IV Data(3).zip' \
+  --ticker SPY --date 2026-10-27 \
+  --rate 0.04 --dividend-yield 0.01 \
+  --exercise-style american --allow-american-proxy \
+  --output calibration_spy_exploratory.json
+```
+
+On this run: **96 selected quotes over eight expiries**, 72 training and 24
+held-out within the **same date**; training / holdout IV RMSE approximately
+**0.400 / 0.407 volatility percentage points**, with **1/24 holdout predictions
+inside bid/ask**. This is *not* a temporal backtest, calibrated European-index
+surface, or evidence of executable market pricing. See
+[Empirical run notes](docs/EMPIRICAL_SPY.md).
+
+If choosing the newest snapshot directly from the ZIP, `.parquet` reading
+requires the `[marketdata]` optional dependencies. The adapter intentionally
+does not silently use an older CSV if Parquet support is missing.
+
+## Core v0.1/v0.2 functionality preserved
+
+| Layer | Capability | Qualification |
 |---|---|---|
-| Vanilla | Black-Scholes/Black-76, implied Black IV, Heston Fourier | Flat r and q; European exercise |
-| Model | Heston correlated price/variance | Q-dynamics, no jumps |
-| Simulation | Full Truncation Euler (v0.1 default), Andersen **QE-M** | Both time discretized under stochastic variance |
-| Exotics | Arithmetic Asian, fixed-strike lookback, up/down knock-in/out barrier | Grid fixings for Asian/lookback; no rebates |
-| Barrier | Grid monitoring or conditional bridge weights | Continuous bridge approximate for Heston |
-| Risk | CRN spot Delta/Gamma and sensitivity to initial variance `v0` | Not market IV Vega or recalibrated Greeks |
-| Statistics | Antithetics, independent-pair SE, normal CIs | CIs exclude time/grid and model bias |
-| Validation | Fourier vanilla; BS continuous-barrier reflection formula; tests, convergence and runtime demos | Not a substitute for independent model validation |
+| Vanilla | Black-76 / Black–Scholes, IV inversion, scalar Heston Fourier | European flat-rate / flat-continuous-dividend |
+| Simulation | Correlated Heston Full Truncation Euler / QE-M | Not exact Heston paths |
+| Payoffs | European, arithmetic Asian, fixed-strike lookback, up/down in/out barrier | Asian/lookback grid fixings, no rebate |
+| Barrier | Discrete or conditional bridge survival | Bridge exact under BS, approximate under Heston |
+| Risk | CRN bump spot Delta/Gamma and initial variance sensitivity | **Not** recalibrated market-IV Vega |
+| Statistics | Pair-aware antithetic SE, CIs | Does not include time-step/model bias |
+| Validation | Scalar Fourier, BS continuous barrier, CIR moments, martingality | Not independent model validation |
 
-`MCConfig.scheme='full_truncation_euler'` and `Barrier.monitoring='discrete'`
-remain the defaults for backwards compatibility with **v0.1**.
+The **defaults** `MCConfig.scheme='full_truncation_euler'` and
+`Barrier.monitoring='discrete'` are unchanged from v0.1. All existing public
+APIs remain available. The new data/calibration modules are additive.
 
 ## Repository layout
 
 ```text
 src/equity_derivatives/
-    models.py               market, model and MC configuration
-    simulation.py           FT Euler and Andersen QE-M
-    payoffs.py              payoff definitions and monitoring convention
-    pricing.py              estimator, survival-weighted barriers and CIs
-    barrier_bridge.py       conditional no-touch weights
-    barrier_reference.py    independent exact Black-Scholes barrier benchmark
-    vanilla.py              Black-76 / Black-Scholes / implied vol
-    heston_fourier.py       semi-analytical Heston vanilla
-    greeks.py               CRN bump risks
+    models.py, simulation.py, payoffs.py, pricing.py, greeks.py
+    vanilla.py, heston_fourier.py, heston_surface.py
+    calibration.py, market_data.py
+    barrier_bridge.py, barrier_reference.py
 examples/
-    price_exotics.py
-    compare_schemes.py
-    barrier_validation.py
-    heston_barrier_grid.py
-    convergence_study.py
+    price_exotics.py, compare_schemes.py, convergence_study.py
+    barrier_validation.py, heston_barrier_grid.py
+    calibrate_synthetic.py, calibrate_snapshot.py
 tests/
 docs/
-    METHODOLOGY.md
-    VALIDATION.md
-    PROVENANCE.md
-    DESIGN_DECISIONS.md
+    METHODOLOGY.md, VALIDATION.md, PROVENANCE.md, DESIGN_DECISIONS.md
+    CALIBRATION.md, MARKET_DATA.md, EMPIRICAL_SPY.md
 ```
 
-## Reliability and validation
+## Validation and limitations
 
-1. Run `pytest -q` for regressions, variance CIR moment matching, Heston
-   martingale tests, Black-Scholes continuous-barrier reference convergence,
-   and knock-in/out parity.
-2. Run `python examples/compare_schemes.py` to examine MC estimates, standard
-   errors and runtimes **against the independent Heston Fourier price**.
-3. Run `python examples/barrier_validation.py` to compare **constant-vol**
-   bridge results against the analytic continuous-monitoring barrier price.
-4. Read [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md) for derivations,
-   estimator conventions and limitations.
-5. Read [`docs/VALIDATION.md`](docs/VALIDATION.md) for actual local outcomes.
+- On the release environment: **74/74 tests pass** (59 carried over from
+  v0.2 plus 15 new tests). Include synthetic parameter recovery, numerical
+  Fourier comparisons, quote screening, archive selection and arbitrage checks.
+- The synthetic scalar-Fourier calibration reproduces Heston inputs closely,
+  but model-to-model recovery cannot establish genuine market fit or
+  identifiability.
+- The actual SPY example shows an IV fit to a European **proxy**, not an
+  exercise-adjusted calibration. Data timestamps, flat input curves, thin
+  bid/ask coverage and Fourier truncation need further analysis.
+- Static-arbitrage diagnostics cover **strike monotonicity and convexity**,
+  not the entire no-static-arbitrage surface or calendar relationships.
+- No bootstrap historical curve/forward estimation, model recalibration
+  Greeks, American pricing, portfolio risk aggregation or market-data
+  downloads are included in v0.3.
 
-## Versioned scope / roadmap
-
-- **v0.1.0:** standalone baseline (Full Truncation Euler, vanilla Fourier,
-  discrete exotics, CRN bump risks).
-- **v0.2.0 (current):** QE-M scheme, conditional barrier bridge, independent
-  Black-Scholes continuous-barrier benchmark, expanded tests and experiments.
-- **v0.3, not implemented:** vanilla-market IV/price surface
-  calibration, quote-quality/no-arbitrage checks, fit and identifiability
-  diagnostics, optional fixture data.
-- **v0.4, not implemented:** expanded sensitivity conventions
-  (sticky model parameters vs recalibrated surface risk), scenario and
-  portfolio-risk outputs.
-
-## License / upstream provenance
-
-MIT. [`docs/PROVENANCE.md`](docs/PROVENANCE.md) describes how standalone
-pricing conventions were informed by the independently supplied FX and FI
-pricing packages and why no runtime dependency was introduced.
+See [Changelog](CHANGELOG.md), [Architecture decisions](docs/DESIGN_DECISIONS.md),
+[Methodology](docs/METHODOLOGY.md), and [Upstream provenance](docs/PROVENANCE.md).
