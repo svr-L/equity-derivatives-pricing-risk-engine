@@ -118,3 +118,25 @@ are outside v0.2.
   environment could not install it; no latest-Parquet calibration is claimed.
 - No release-level cross-date OOS test, historical curve validation,
   calibrated exotic market quoting or independent production-grade validation.
+
+## v0.4.0 term curves and history validation (2026-11-14)
+
+- 86/86 tests: 74 prior v0.3 tests preserved plus 12 added tests.
+- Scalar and batch Heston Fourier and both QE-M/FT MC schemes reproduce the
+  previous flat-rate results when supplied equivalent flat curves.
+- Deterministic zero-variance path with **non-flat** piecewise curves reproduces
+  exact intermediate forwards, terminal forwards, Asian average payoff and
+  maturity discounting. This checks path carry, not just terminal carry.
+- Curve CSV/JSON adapter date mismatch, quote/curve spot mismatch, out-of-range
+  tenor errors, validity of forward reconstruction, and histogram chronology
+  guards tested. Quote filter can discard expiries beyond curve coverage without
+  extrapolating prices for those rejected rows.
+- Synthetic per-date Heston calibration and next-date parameter-transfer
+  diagnostics tested. This is neither a market fit nor a tradable forecast.
+- SPY collector CSV dated 2026-10-27 re-run in **legacy flat/proxy mode**:
+  72 train / 24 holdout; IV RMSE 0.4003 / 0.4074 percentage points;
+  train bid/ask coverage 2/72, holdout 1/24; exploratory r=4%, q=1%.
+  This is **not** a calibration using real historical OIS/forwards.
+- Term-structure implementation does not include scheduled cash dividends;
+  American ETF exercise not handled; confidence intervals exclude model and
+  discretization bias.
