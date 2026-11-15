@@ -13,7 +13,8 @@ from dataclasses import asdict
 from pathlib import Path
 
 from equity_derivatives import (
-    CalibrationConfig, EquityMarket, calibrate_heston, evaluate_heston_fit,
+    CalibrationConfig, EquityMarket, DiscountCurve, EquityCarryCurves,
+    calibrate_heston, evaluate_heston_fit,
 )
 from equity_derivatives.market_data import (
     QuoteFilterConfig, filter_option_quotes, load_archive_snapshot, load_snapshot,
@@ -26,10 +27,12 @@ def main():
     ap.add_argument('source', type=Path, help='Collector archive .zip or one snapshot .csv.gz/.parquet')
     ap.add_argument('--ticker',required=True)
     ap.add_argument('--date',help='YYYY-MM-DD snapshot date (ZIP only; otherwise latest dated snapshot)')
-    ap.add_argument('--rate',type=float,required=True,
+    ap.add_argument('--rate',type=float,
                     help='Explicit annualized continuously compounded discount rate (decimal)')
-    ap.add_argument('--dividend-yield',type=float,required=True,
+    ap.add_argument('--dividend-yield',type=float,
                     help='Explicit annualized continuous dividend yield (decimal)')
+    ap.add_argument('--curves-json',type=Path,
+                    help='Dated supplied curves: asof, discount{tenors,dfs}, forwards{tenors,values}')
     ap.add_argument('--exercise-style',choices=['european','american'],default='american')
     ap.add_argument('--allow-american-proxy',action='store_true')
     ap.add_argument('--max-expiries',type=int,default=8)
@@ -49,13 +52,29 @@ def main():
         raise ValueError('empty data frame')
     if str(frame.underlying_ticker.iloc[0]).upper() != args.ticker.upper():
         raise ValueError('ticker mismatch between snapshot and CLI')
-    market=EquityMarket(float(frame.underlying_spot.iloc[0]),args.rate,args.dividend_yield)
+    spot=float(frame.underlying_spot.iloc[0])
+    curves=None
+    if args.curves_json is not None:
+        if args.rate is not None or args.dividend_yield is not None:
+            ap.error('--curves-json is mutually exclusive with --rate/--dividend-yield')
+        raw=json.loads(args.curves_json.read_text(encoding='utf-8'))
+        dc=DiscountCurve(tuple(raw['discount']['tenors']),tuple(raw['discount']['dfs']))
+        curves=EquityCarryCurves.from_forwards(
+            spot, dc, raw['forwards']['tenors'],raw['forwards']['values'],
+            asof=raw['asof'])
+        curves.validate_snapshot(str(frame.snapshot_ts_utc.iloc[0]))
+        market=EquityMarket(spot)
+    else:
+        if args.rate is None or args.dividend_yield is None:
+            ap.error('supply both --rate and --dividend-yield, or --curves-json')
+        market=EquityMarket(spot,args.rate,args.dividend_yield)
     quotes, report=filter_option_quotes(
         frame,market,
         config=QuoteFilterConfig(max_expiries=args.max_expiries,
                                  max_quotes_per_expiry_per_side=args.per_side),
         exercise_style=args.exercise_style,
-        allow_american_proxy=args.allow_american_proxy)
+        allow_american_proxy=args.allow_american_proxy,
+        carry_curves=curves)
     if len(quotes)<8:
         raise ValueError('insufficient liquid quotes for stable 5-parameter calibration')
     # Within-snapshot holdout: NOT a time-series/out-of-sample market backtest.
@@ -70,14 +89,16 @@ def main():
     result=calibrate_heston(market,train,
                             config=CalibrationConfig(n_starts=args.starts,max_nfev=args.max_nfev),
                             exercise_style=args.exercise_style,
-                            allow_american_proxy=args.allow_american_proxy)
-    test=evaluate_heston_fit(market,result.params,held)
+                            allow_american_proxy=args.allow_american_proxy,carry_curves=curves)
+    test=evaluate_heston_fit(market,result.params,held,carry_curves=curves)
     selected=frame.loc[frame.contractSymbol.astype(str).isin({q.identifier for q in quotes})]
     arb=static_arbitrage_report(selected)
     payload={
-        'version':'0.3.0', 'source':source, 'snapshot_utc':report.snapshot_timestamp,
-        'ticker':report.ticker,'spot':market.spot,'assumed_continuous_rate':market.rate,
-        'assumed_continuous_dividend_yield':market.dividend_yield,
+        'version':'0.4.0', 'source':source, 'snapshot_utc':report.snapshot_timestamp,
+        'ticker':report.ticker,'spot':market.spot,
+        'flat_rate_assumption':(market.rate if curves is None else None),
+        'flat_dividend_assumption':(market.dividend_yield if curves is None else None),
+        'dated_market_curves':(str(args.curves_json) if curves is not None else None),
         'conventions':result.assumptions,
         'note':'Within-snapshot holdout, not temporal out-of-sample; American proxy may be biased',
         'filter_report':asdict(report),'strike_arbitrage_selected':asdict(arb),
@@ -86,6 +107,7 @@ def main():
         'training_iv_rmse_vol_points':100*result.market_rmse_iv,
         'holdout_iv_rmse_vol_points':100*test.rmse_iv,
         'training_price_rmse':result.market_rmse_price,
+        'training_bidask_coverage':result.bid_ask_coverage,
         'holdout_price_rmse':test.rmse_price,
         'holdout_bidask_coverage':test.bid_ask_coverage,
         'jacobian_condition_number':(result.jacobian_condition_number
