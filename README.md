@@ -1,6 +1,24 @@
-# Equity Derivatives Pricing & Risk Engine
+# Equity Derivatives Pricing & Risk Engine — v0.4.0
 
-**v0.3.0 — standalone Python research package.** Heston / Black–Scholes
+**New in v0.4.0 — dated term structures and chronology.** Added deterministic
+risk-free discount factors and proportional-dividend/forward curves (explicit
+as-of and no silent extrapolation), integrated consistently into Fourier
+Heston vanilla pricing, calibrated IV, Monte Carlo path carry and Greeks.
+The daily collector can be read with **externally verified** dated curves,
+while American ETF options still require an explicit European-proxy opt-in.
+Per-date Heston calibration, chronology guards, in-sample bid/ask coverage
+and next-date *parameter-transfer* diagnostics are also included. No
+historical curves or European exercise corrections are synthesized.
+
+**All v0.3.0 APIs remain valid**, and flat rate/yield behavior is the default.
+See [v0.4 term curves and history](docs/CURVES_AND_HISTORY.md) and
+`examples/dated_curves_synthetic.py` for runnable examples.
+
+---
+
+## Project overview
+
+**v0.4.0 — standalone Python research package.** Heston / Black–Scholes
 vanilla pricing, Heston Monte Carlo pricing of Asian, lookback and barrier
 options, Greeks, implied volatility, calibrated European vanilla surfaces,
 source-compatible option-chain snapshot ingestion and numerical validation.
@@ -104,7 +122,7 @@ does not silently use an older CSV if Parquet support is missing.
 
 | Layer | Capability | Qualification |
 |---|---|---|
-| Vanilla | Black-76 / Black–Scholes, IV inversion, scalar Heston Fourier | European flat-rate / flat-continuous-dividend |
+| Vanilla | Black-76 / Black–Scholes, IV inversion, scalar/batch Heston Fourier | Flat or dated deterministic discount/proportional-dividend curves; European |
 | Simulation | Correlated Heston Full Truncation Euler / QE-M | Not exact Heston paths |
 | Payoffs | European, arithmetic Asian, fixed-strike lookback, up/down in/out barrier | Asian/lookback grid fixings, no rebate |
 | Barrier | Discrete or conditional bridge survival | Bridge exact under BS, approximate under Heston |
@@ -136,9 +154,9 @@ docs/
 
 ## Validation and limitations
 
-- On the release environment: **74/74 tests pass** (59 carried over from
-  v0.2 plus 15 new tests). Include synthetic parameter recovery, numerical
-  Fourier comparisons, quote screening, archive selection and arbitrage checks.
+- On the **v0.4 release environment: 86/86 tests pass**, including all 74 prior
+  v0.3 tests and 12 added tests of dated curves, chronological calibration,
+  Fourier/MC parity, quote screening and as-of safeguards.
 - The synthetic scalar-Fourier calibration reproduces Heston inputs closely,
   but model-to-model recovery cannot establish genuine market fit or
   identifiability.
@@ -147,9 +165,9 @@ docs/
   bid/ask coverage and Fourier truncation need further analysis.
 - Static-arbitrage diagnostics cover **strike monotonicity and convexity**,
   not the entire no-static-arbitrage surface or calendar relationships.
-- No bootstrap historical curve/forward estimation, model recalibration
-  Greeks, American pricing, portfolio risk aggregation or market-data
-  downloads are included in v0.3.
+- No independent historical curve/forward sourcing, recalibrated market-IV
+  Greeks, American exercise pricing, cash-dividend schedule, portfolio risk
+  aggregation or market-data downloads are included in v0.4.
 
 See [Changelog](CHANGELOG.md), [Architecture decisions](docs/DESIGN_DECISIONS.md),
 [Methodology](docs/METHODOLOGY.md), and [Upstream provenance](docs/PROVENANCE.md).

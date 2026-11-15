@@ -1,3 +1,21 @@
+## v0.4.0 — dated market curves and point-in-time history (2026-11-14)
+
+- Added `DiscountCurve` and `EquityCarryCurves`, continuous proportional
+  carry, log-DF interpolation, explicit as-of checks and no hidden
+  extrapolation, or inferred curve inputs.
+- Integrated option-maturity forward and discount curves in Heston Fourier
+  surface/scalar pricing and IV calibration; integrated time-varying drift
+  into the Heston Monte Carlo path simulation, discounting and bumped Greeks.
+- Added collector quote filtering using curve-based forward moneyness and IV,
+  strict UTC date alignment, and `--curves-json` CLI input (flat mode retained).
+- Added in-sample calibration bid/ask coverage and number of quoted spreads;
+  chronological `calibrate_history`, warm starts, and next-date parameter
+  transfer diagnostics, explicitly NOT a tradable backtest.
+- Added dedicated regression tests and synthetic dated curve example.
+- Known limits: no independently sourced historic OIS or ETF forward curves;
+  no exercise adjustment to American ETF options; no scheduled cash dividends.
+- FX and FI repositories not modified. Public v0.3 interfaces preserved.
+
 # Changelog
 
 ## 0.3.0 — 2026-11-11
