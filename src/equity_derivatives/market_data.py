@@ -17,6 +17,7 @@ import numpy as np
 
 from .calibration import VanillaQuote
 from .models import EquityMarket
+from .carry import EquityCarryCurves
 from .vanilla import implied_vol
 
 
@@ -110,7 +111,8 @@ def load_archive_snapshot(archive: str | Path, ticker: str, *,
 def filter_option_quotes(frame, market: EquityMarket, *,
                          config: QuoteFilterConfig | None = None,
                          exercise_style: str = "american",
-                         allow_american_proxy: bool = False
+                         allow_american_proxy: bool = False,
+                         carry_curves: EquityCarryCurves | None = None
                          ) -> tuple[list[VanillaQuote], QuoteFilterReport]:
     """Quality screen and stratified OTM selection for one dated collector snapshot.
 
@@ -139,6 +141,9 @@ def filter_option_quotes(frame, market: EquityMarket, *,
         raise ValueError("filter expects exactly one ticker and one timestamp")
     ticker = tickers[0]
     stamp = str(stamps[0])
+    if carry_curves is not None:
+        carry_curves.validate_market(market)
+        carry_curves.validate_snapshot(stamp)
     spot = pd.to_numeric(x.underlying_spot, errors="coerce")
     if not (np.isfinite(spot).all() and np.allclose(spot, market.spot, rtol=1e-7, atol=1e-7)):
         raise ValueError("provided market spot must match the archived snapshot spot")
@@ -146,8 +151,21 @@ def filter_option_quotes(frame, market: EquityMarket, *,
         x[col] = pd.to_numeric(x[col], errors="coerce")
     original_n = len(x)
     t = x.dte_calendar/365.0  # ACT/365F calendar-days convention, not session time
-    fwd = market.spot*np.exp((market.rate-market.dividend_yield)*t)
-    lm = np.log(x.strike/fwd)
+    if carry_curves is None:
+        fwd = market.spot*np.exp((market.rate-market.dividend_yield)*t)
+    else:
+        # Quote chains may include expiries beyond the selected calibration
+        # horizon. Do not extrapolate curves merely to inspect rejected rows.
+        max_covered = min(carry_curves.discount_curve.tenors[-1],
+                          carry_curves.dividend_curve.tenors[-1])
+        within = (t.between(config.min_dte/365., config.max_dte/365.)
+                  & t.le(max_covered))
+        fwd = pd.Series(np.nan, index=x.index, dtype=float)
+        eligible = t.loc[within].to_numpy(float)
+        fwd.loc[within] = (carry_curves.spot*carry_curves.dividend_curve(eligible)
+                           / carry_curves.discount_curve(eligible))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        lm = np.log(x.strike/fwd)
     is_call = x.option_type.eq("call")
     is_put = x.option_type.eq("put")
     # Use *forward* moneyness for OTM filtering, not spot moneyness.
@@ -174,7 +192,9 @@ def filter_option_quotes(frame, market: EquityMarket, *,
     ivs = []
     for row in x.itertuples():
         try:
-            iv = implied_vol(float(row.mid_recomputed), market, float(row.strike),
+            mkt = (carry_curves.effective_market(float(row.maturity))
+                   if carry_curves is not None else market)
+            iv = implied_vol(float(row.mid_recomputed), mkt, float(row.strike),
                              float(row.maturity), row.option_type == "call")
         except (ValueError, OverflowError):
             iv = math.nan
@@ -207,6 +227,8 @@ def filter_option_quotes(frame, market: EquityMarket, *,
     caveat = ("AMERICAN ETF OPTIONS: EUROPEAN PROXY ONLY; NO EARLY-EXERCISE ADJUSTMENT"
               if exercise_style == "american" else
               "European exercise assumed; curve inputs and quote timestamps must be validated")
+    if carry_curves is not None:
+        caveat += "; dated user-input proportional-dividend and discount curves"
     return quotes, QuoteFilterReport(ticker=ticker, snapshot_timestamp=stamp,
                                     original_rows=original_n, after_basic_filters=basic,
                                     after_european_iv_checks=after_iv,

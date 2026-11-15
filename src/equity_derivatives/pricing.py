@@ -8,6 +8,7 @@ import numpy as np
 from scipy.stats import norm
 
 from .models import EquityMarket, HestonParams, MCConfig
+from .carry import EquityCarryCurves
 from .payoffs import Barrier, Payoff
 from .barrier_bridge import barrier_survival_probabilities
 from .simulation import NormalShocks, simulate_heston
@@ -28,10 +29,11 @@ class PriceResult:
 
 def price_mc(market: EquityMarket, params: HestonParams, payoff: Payoff,
              config: MCConfig, *, confidence_level: float = 0.95,
-             shocks: NormalShocks | None = None) -> PriceResult:
+             shocks: NormalShocks | None = None,
+             carry_curves: EquityCarryCurves | None = None) -> PriceResult:
     if not 0 < confidence_level < 1:
         raise ValueError("confidence_level must lie in (0, 1)")
-    paths = simulate_heston(market, params, config, shocks)
+    paths = simulate_heston(market, params, config, shocks, carry_curves=carry_curves)
     if isinstance(payoff, Barrier) and payoff.monitoring == "continuous_bridge":
         survival = barrier_survival_probabilities(paths, params, config, payoff)
         phi = 1 if payoff.is_call else -1
@@ -41,7 +43,8 @@ def price_mc(market: EquityMarket, params: HestonParams, payoff: Payoff,
         samples = np.asarray(payoff.evaluate(paths.spot), dtype=float)
     if samples.shape != (config.n_paths,):
         raise ValueError("payoff must return one value per path")
-    discounted = market.discount(config.maturity) * samples
+    discounted = (carry_curves.discount(config.maturity) if carry_curves is not None
+                  else market.discount(config.maturity)) * samples
     # Each antithetic pair has one independent Gaussian seed. Using all paths
     # as iid incorrectly understates or overstates the Monte Carlo SE.
     independent = (discounted.reshape(-1, 2).mean(axis=1) if config.antithetic

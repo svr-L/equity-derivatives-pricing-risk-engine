@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from .models import EquityMarket, HestonParams, MCConfig
+from .carry import EquityCarryCurves
 from .payoffs import Payoff
 from .pricing import price_mc
 from .simulation import sample_shocks
@@ -25,14 +26,19 @@ class BumpGreeks:
 
 def bump_greeks(market: EquityMarket, params: HestonParams, payoff: Payoff,
                 config: MCConfig, *, relative_spot_bump: float = 0.01,
-                absolute_v0_bump: float = 0.001) -> BumpGreeks:
+                absolute_v0_bump: float = 0.001,
+                carry_curves: EquityCarryCurves | None = None) -> BumpGreeks:
     if not 0 < relative_spot_bump < 1 or absolute_v0_bump <= 0:
         raise ValueError("bumps must satisfy 0<spot bump<1 and v0 bump>0")
     if params.v0 - absolute_v0_bump < 0:
         raise ValueError("central v0 bump requires v0 >= absolute_v0_bump")
+    if carry_curves is not None:
+        carry_curves.validate_market(market)
     shocks = sample_shocks(config)
     def value(mkt: EquityMarket, par: HestonParams) -> float:
-        return price_mc(mkt, par, payoff, config, shocks=shocks).price
+        return price_mc(mkt, par, payoff, config, shocks=shocks,
+                        carry_curves=(replace(carry_curves, spot=mkt.spot)
+                                      if carry_curves is not None else None)).price
 
     p0 = value(market, params)
     ds = market.spot * relative_spot_bump

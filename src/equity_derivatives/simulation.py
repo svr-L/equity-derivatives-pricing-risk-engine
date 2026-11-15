@@ -14,6 +14,7 @@ from scipy.special import ndtr
 from numpy.typing import NDArray
 
 from .models import EquityMarket, HestonParams, MCConfig
+from .carry import EquityCarryCurves
 
 
 @dataclass(frozen=True)
@@ -115,7 +116,8 @@ def _qe_m_step(v: NDArray[np.float64], zv: NDArray[np.float64],
 
 
 def simulate_heston(market: EquityMarket, params: HestonParams, config: MCConfig,
-                    shocks: NormalShocks | None = None) -> HestonPaths:
+                    shocks: NormalShocks | None = None, *,
+                    carry_curves: EquityCarryCurves | None = None) -> HestonPaths:
     """Simulate Heston grid under config.scheme using compatible shock shapes.
 
     Full Truncation Euler is the v0.1 default and remains unchanged. QE-M uses
@@ -123,6 +125,11 @@ def simulate_heston(market: EquityMarket, params: HestonParams, config: MCConfig
     for the conditional stock Gaussian. Parameters/shocks can be reused with
     common-random-number bump estimates.
     """
+    if carry_curves is not None:
+        carry_curves.validate_market(market)
+        # pre-validate the complete requested simulation horizon before allocating paths
+        carry_curves.discount(config.maturity)
+        carry_curves.dividend_curve(config.maturity)
     if shocks is None:
         shocks = sample_shocks(config)
     shape = (config.n_steps, config.n_paths)
@@ -143,10 +150,12 @@ def simulate_heston(market: EquityMarket, params: HestonParams, config: MCConfig
     for j in range(config.n_steps):
         z_v = shocks.z_variance[j]
         z_i = shocks.z_independent[j]
+        step_drift = (carry_curves.log_forward_increment(j*dt, (j+1)*dt)/dt
+                      if carry_curves is not None else drift)
         if config.scheme == "full_truncation_euler":
             vp = np.maximum(raw_v, 0.)
             z_s = params.rho * z_v + root_one_minus_rho2 * z_i
-            log_s += (drift - .5*vp)*dt + np.sqrt(vp)*root_dt*z_s
+            log_s += (step_drift - .5*vp)*dt + np.sqrt(vp)*root_dt*z_s
             raw_v += (params.kappa*(params.theta-vp)*dt
                       + params.xi*np.sqrt(vp)*root_dt*z_v)
             v_out = np.maximum(raw_v, 0.)
@@ -157,10 +166,10 @@ def simulate_heston(market: EquityMarket, params: HestonParams, config: MCConfig
             integrated = (params.theta*dt + (vi-params.theta)
                           * (-np.expm1(-params.kappa*dt))/params.kappa)
             z_s = params.rho*z_v + root_one_minus_rho2*z_i
-            log_s += drift*dt - .5*integrated + np.sqrt(np.maximum(integrated, 0.))*z_s
+            log_s += step_drift*dt - .5*integrated + np.sqrt(np.maximum(integrated, 0.))*z_s
             raw_v = v_out
         else:
-            v_out, log_increment = _qe_m_step(raw_v, z_v, z_i, params, dt, drift)
+            v_out, log_increment = _qe_m_step(raw_v, z_v, z_i, params, dt, step_drift)
             log_s += log_increment
             raw_v = v_out
         spots[j+1] = np.exp(log_s)

@@ -1,4 +1,7 @@
-"""Equity derivatives pricing & risk engine, version 0.3.0."""
+"""Equity derivatives pricing & risk engine, version 0.4.0."""
+from .carry import DiscountCurve, EquityCarryCurves
+from .history import (DatedCalibrationSlice, DatedCalibrationResult,
+                      calibrate_history, history_summary)
 from .heston_fourier import heston_european, heston_log_return_cf
 from .heston_surface import heston_surface_prices
 from .barrier_bridge import barrier_survival_probabilities
@@ -15,7 +18,8 @@ from .calibration import (
 )
 
 __all__ = [
-    "black_scholes_barrier", "barrier_survival_probabilities",
+    "DiscountCurve", "EquityCarryCurves", "DatedCalibrationSlice",
+    "DatedCalibrationResult", "calibrate_history", "history_summary", "black_scholes_barrier", "barrier_survival_probabilities",
     "EquityMarket", "HestonParams", "MCConfig", "European", "ArithmeticAsian",
     "FixedStrikeLookback", "Barrier", "HestonPaths", "NormalShocks", "sample_shocks",
     "simulate_heston", "price_mc", "PriceResult", "bump_greeks", "BumpGreeks",

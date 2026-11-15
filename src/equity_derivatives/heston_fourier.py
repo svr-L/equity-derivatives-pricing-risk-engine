@@ -12,6 +12,7 @@ import numpy as np
 from scipy.integrate import quad
 
 from .models import EquityMarket, HestonParams
+from .carry import EquityCarryCurves
 from .vanilla import black_scholes
 
 
@@ -47,7 +48,8 @@ def heston_log_return_cf(u: complex, params: HestonParams, maturity: float,
 
 def heston_european(market: EquityMarket, params: HestonParams,
                     strike: float, maturity: float, is_call: bool = True,
-                    *, integration_upper: float = 200., epsabs: float = 1e-8) -> float:
+                    *, integration_upper: float = 200., epsabs: float = 1e-8,
+                    carry_curves: EquityCarryCurves | None = None) -> float:
     """Price European by Lewis integral; put from put-call parity.
 
     'integration_upper' is the Fourier truncation boundary and must be
@@ -61,6 +63,10 @@ def heston_european(market: EquityMarket, params: HestonParams,
         raise ValueError("integration_upper must be positive")
     if not math.isfinite(epsabs) or epsabs <= 0:
         raise ValueError("epsabs must be positive")
+    if carry_curves is not None:
+        carry_curves.validate_market(market)
+        if maturity > 0:
+            market = carry_curves.effective_market(maturity)
     if maturity == 0:
         return max((1 if is_call else -1)*(market.spot-strike), 0.)
     if params.xi == 0:

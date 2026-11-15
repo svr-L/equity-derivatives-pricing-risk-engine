@@ -15,6 +15,7 @@ from scipy.optimize import least_squares
 
 from .heston_surface import heston_surface_prices
 from .models import EquityMarket, HestonParams
+from .carry import EquityCarryCurves
 from .vanilla import black_vega, implied_vol
 
 
@@ -103,6 +104,8 @@ class CalibrationResult:
     model_prices: np.ndarray = field(repr=False)
     market_ivs: np.ndarray = field(repr=False)
     model_ivs: np.ndarray = field(repr=False)
+    bid_ask_coverage: float | None = None
+    bid_ask_n: int = 0
     identifiers: tuple[str, ...] = ()
     starts: tuple[StartDiagnostic, ...] = ()
     assumptions: str = "European exercise; flat continuously compounded rate and dividend yield"
@@ -138,7 +141,8 @@ def calibrate_heston(market: EquityMarket, quotes: Sequence[VanillaQuote], *,
                      config: CalibrationConfig | None = None,
                      initial: HestonParams | None = None,
                      exercise_style: str = "european",
-                     allow_american_proxy: bool = False) -> CalibrationResult:
+                     allow_american_proxy: bool = False,
+                     carry_curves: EquityCarryCurves | None = None) -> CalibrationResult:
     """Multi-start nonlinear least-squares calibration.
 
     For American-style quotes (common for ETF options) caller must explicitly
@@ -151,6 +155,8 @@ def calibrate_heston(market: EquityMarket, quotes: Sequence[VanillaQuote], *,
     if exercise_style == "american" and not allow_american_proxy:
         raise ValueError("American option quotes need an exercise-aware pricer; "
                          "set allow_american_proxy=True only for explicitly labelled exploration")
+    if carry_curves is not None:
+        carry_curves.validate_market(market)
     config = config or CalibrationConfig()
     quotes = tuple(quotes)
     if len(quotes) < 6:
@@ -161,11 +167,13 @@ def calibrate_heston(market: EquityMarket, quotes: Sequence[VanillaQuote], *,
     t = np.asarray([q.maturity for q in quotes], float)
     ic = np.asarray([q.is_call for q in quotes], bool)
     price = np.asarray([q.mid for q in quotes], float)
-    market_iv = np.array([implied_vol(q.mid, market, q.strike, q.maturity, q.is_call)
-                          for q in quotes])
+    def maturity_market(t):
+        return carry_curves.effective_market(t) if carry_curves is not None else market
+    market_iv = np.array([implied_vol(q.mid, maturity_market(q.maturity), q.strike,
+                                       q.maturity, q.is_call) for q in quotes])
     if np.any((market_iv < 0.015) | (market_iv > 3)):
         raise ValueError("IV outside calibration range [1.5%, 300%]; filter quotes first")
-    market_vega = np.asarray([black_vega(market, q.strike, q.maturity, iv)
+    market_vega = np.asarray([black_vega(maturity_market(q.maturity), q.strike, q.maturity, iv)
                               for q, iv in zip(quotes, market_iv)])
     vega_denom = np.maximum(market_vega, config.vega_floor_frac_spot*market.spot)
     # Fix quote weights outside optimization: model cannot adjust its own weights.
@@ -183,13 +191,13 @@ def calibrate_heston(market: EquityMarket, quotes: Sequence[VanillaQuote], *,
         with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
             return heston_surface_prices(market, _as_parameters(x), k, t, ic,
                                          n_nodes=config.n_nodes,
-                                         integration_upper=config.integration_upper)
+                                         integration_upper=config.integration_upper, carry_curves=carry_curves)
 
     def model_ivs(pred: np.ndarray) -> np.ndarray:
         out = np.empty(len(pred))
         for j, q in enumerate(quotes):
             try:
-                out[j] = implied_vol(float(pred[j]), market, q.strike, q.maturity, q.is_call)
+                out[j] = implied_vol(float(pred[j]), maturity_market(q.maturity), q.strike, q.maturity, q.is_call)
             except ValueError:
                 out[j] = np.nan
         return out
@@ -230,7 +238,12 @@ def calibrate_heston(market: EquityMarket, quotes: Sequence[VanillaQuote], *,
             else math.inf)
     assumptions = ("European exercise" if exercise_style == "european" else
                    "AMERICAN QUOTES FIT WITH EUROPEAN HESTON PROXY; NO EXERCISE PREMIA")
-    assumptions += "; flat user-supplied rate and continuous dividend yield"
+    quoted = [(float(x),q.bid,q.ask) for x,q in zip(pred,quotes) if q.bid is not None]
+    coverage = (float(np.mean([bid <= x <= ask for x,bid,ask in quoted]))
+                if quoted else None)
+    assumptions += ("; dated user-supplied discount and proportional-dividend curves"
+                    if carry_curves is not None else
+                    "; flat user-supplied rate and continuous dividend yield")
     return CalibrationResult(
         params=_as_parameters(fit.x), objective=config.objective,
         success=bool(fit.success), optimizer_message=str(fit.message),
@@ -241,7 +254,8 @@ def calibrate_heston(market: EquityMarket, quotes: Sequence[VanillaQuote], *,
         jacobian_condition_number=cond, n_quotes=len(quotes),
         n_expiries=len(set(t)), n_starts=len(starts),
         market_prices=price, model_prices=pred, market_ivs=market_iv,
-        model_ivs=iv_pred, identifiers=tuple(q.identifier for q in quotes),
+        model_ivs=iv_pred, bid_ask_coverage=coverage, bid_ask_n=len(quoted),
+        identifiers=tuple(q.identifier for q in quotes),
         starts=tuple(starts), assumptions=assumptions)
 
 
@@ -257,18 +271,24 @@ class FitEvaluation:
 
 def evaluate_heston_fit(market: EquityMarket, params: HestonParams,
                         quotes: Sequence[VanillaQuote], *,
-                        n_nodes: int = 128, integration_upper: float = 200.) -> FitEvaluation:
+                        n_nodes: int = 128, integration_upper: float = 200.,
+                        carry_curves: EquityCarryCurves | None = None) -> FitEvaluation:
     """Evaluate any nonempty holdout quote set without refitting parameters."""
     quotes = tuple(quotes)
     if not quotes:
         raise ValueError("nonempty holdout quote set required")
+    if carry_curves is not None:
+        carry_curves.validate_market(market)
+    def maturity_market(t):
+        return carry_curves.effective_market(t) if carry_curves is not None else market
     p = heston_surface_prices(market, params, [x.strike for x in quotes],
                               [x.maturity for x in quotes], [x.is_call for x in quotes],
-                              n_nodes=n_nodes, integration_upper=integration_upper)
+                              n_nodes=n_nodes, integration_upper=integration_upper,
+                              carry_curves=carry_curves)
     y = np.array([x.mid for x in quotes])
-    iv_model = np.array([implied_vol(float(px), market, q.strike, q.maturity, q.is_call)
+    iv_model = np.array([implied_vol(float(px), maturity_market(q.maturity), q.strike, q.maturity, q.is_call)
                          for px, q in zip(p, quotes)])
-    iv_obs = np.array([implied_vol(q.mid, market, q.strike, q.maturity, q.is_call)
+    iv_obs = np.array([implied_vol(q.mid, maturity_market(q.maturity), q.strike, q.maturity, q.is_call)
                        for q in quotes])
     quoted = [(float(px), q.bid, q.ask) for px, q in zip(p, quotes) if q.bid is not None]
     coverage = (float(np.mean([bid <= px <= ask for px, bid, ask in quoted]))

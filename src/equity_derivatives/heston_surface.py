@@ -14,6 +14,7 @@ import numpy as np
 from numpy.polynomial.legendre import leggauss
 
 from .models import EquityMarket, HestonParams
+from .carry import EquityCarryCurves
 from .vanilla import black_scholes
 
 
@@ -50,7 +51,8 @@ def _heston_cf_array(u: np.ndarray, params: HestonParams, t: float,
 def heston_surface_prices(market: EquityMarket, params: HestonParams,
                           strikes: np.ndarray, maturities: np.ndarray,
                           is_calls: np.ndarray | None = None, *,
-                          n_nodes: int = 96, integration_upper: float = 180.) -> np.ndarray:
+                          n_nodes: int = 96, integration_upper: float = 180.,
+                          carry_curves: EquityCarryCurves | None = None) -> np.ndarray:
     """Batch discounted European calls/puts under flat rates/dividends.
 
     Inputs broadcast to a common shape, outputs preserve it. The Fourier
@@ -68,12 +70,15 @@ def heston_surface_prices(market: EquityMarket, params: HestonParams,
         raise ValueError("strikes must be positive and finite")
     if np.any(~np.isfinite(maturities)) or np.any(maturities < 0):
         raise ValueError("maturities must be finite and nonnegative")
+    if carry_curves is not None:
+        carry_curves.validate_market(market)
     u, weights = _quadrature(n_nodes, float(integration_upper))
     result = np.empty(strikes.size, dtype=float)
     kflat, tflat, calls = strikes.ravel(), maturities.ravel(), is_calls.ravel()
     for t in np.unique(tflat):
         idx = np.flatnonzero(tflat == t)
         k = kflat[idx]
+        mkt = carry_curves.effective_market(float(t)) if carry_curves is not None and t > 0 else market
         if t == 0:
             result[idx] = np.where(calls[idx], np.maximum(market.spot-k, 0),
                                    np.maximum(k-market.spot, 0))
@@ -81,16 +86,16 @@ def heston_surface_prices(market: EquityMarket, params: HestonParams,
         if params.xi == 0:
             intvar = params.theta*t + (params.v0-params.theta)*(
                 -math.expm1(-params.kappa*t))/params.kappa
-            result[idx] = [black_scholes(market, float(s), float(t),
+            result[idx] = [black_scholes(mkt, float(s), float(t),
                                          math.sqrt(max(0., intvar)/t), bool(ic))
                            for s, ic in zip(k, calls[idx])]
             continue
-        cf = _heston_cf_array(u - 0.5j, params, float(t), market.rate, market.dividend_yield)
+        cf = _heston_cf_array(u - 0.5j, params, float(t), mkt.rate, mkt.dividend_yield)
         base = cf*weights/(u*u + 0.25)
         lm = np.log(market.spot/k)
         integral = (np.exp(1j*lm[:, None]*u[None, :]) * base[None, :]).real.sum(axis=1)
-        call = (market.spot*math.exp(-market.dividend_yield*t)
-                - math.exp(-market.rate*t)*np.sqrt(market.spot*k)*integral/math.pi)
-        put = call - market.spot*math.exp(-market.dividend_yield*t) + k*math.exp(-market.rate*t)
+        call = (mkt.spot*math.exp(-mkt.dividend_yield*t)
+                - math.exp(-mkt.rate*t)*np.sqrt(mkt.spot*k)*integral/math.pi)
+        put = call - mkt.spot*math.exp(-mkt.dividend_yield*t) + k*math.exp(-mkt.rate*t)
         result[idx] = np.where(calls[idx], call, put)
     return result.reshape(strikes.shape)
