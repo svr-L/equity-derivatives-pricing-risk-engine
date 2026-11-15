@@ -1,19 +1,4 @@
-# Equity Derivatives Pricing & Risk Engine — v0.4.0
-
-**New in v0.4.0 — dated term structures and chronology.** Added deterministic
-risk-free discount factors and proportional-dividend/forward curves (explicit
-as-of and no silent extrapolation), integrated consistently into Fourier
-Heston vanilla pricing, calibrated IV, Monte Carlo path carry and Greeks.
-The daily collector can be read with **externally verified** dated curves,
-while American ETF options still require an explicit European-proxy opt-in.
-Per-date Heston calibration, chronology guards, in-sample bid/ask coverage
-and next-date *parameter-transfer* diagnostics are also included. No
-historical curves or European exercise corrections are synthesized.
-
-**All v0.3.0 APIs remain valid**, and flat rate/yield behavior is the default.
-See [v0.4 term curves and history](docs/CURVES_AND_HISTORY.md) and
-`examples/dated_curves_synthetic.py` for runnable examples.
-
+# Equity Derivatives Pricing & Risk Engine — 
 ---
 
 ## Project overview
