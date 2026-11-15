@@ -1,5 +1,4 @@
-# Equity Derivatives Pricing & Risk Engine — 
----
+# Equity Derivatives Pricing & Risk Engine
 
 ## Project overview
 
