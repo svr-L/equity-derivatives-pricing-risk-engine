@@ -66,17 +66,30 @@ def _qe_m_step(v: NDArray[np.float64], zv: NDArray[np.float64],
           + theta * xi**2 * one_minus_decay**2 / (2 * k))
     psi = np.divide(s2, m*m, out=np.zeros_like(v), where=m > 0)
     out = np.zeros_like(v)
+    increment = np.empty_like(v)
+
+    # Degenerate CIR transition (psi ~ 0: zero variance, or vol-of-vol so small
+    # that the transition is numerically deterministic). Use the xi -> 0 limit
+    # of QE-M: v_next = m and a Gaussian log-stock increment with the FULL
+    # trapezoidal integrated variance, correlated with z_variance. The general
+    # formula below would recover the rho-share of the stock variance only from
+    # (rho/xi)*(v_next - m), which vanishes when v_next is set to m.
+    deterministic = psi < 1e-12
+    if np.any(deterministic):
+        md = m[deterministic]
+        out[deterministic] = md
+        integrated = np.maximum(.5 * dt * (v[deterministic] + md), 0.)
+        z_s = rho * zv[deterministic] + np.sqrt(max(0., 1. - rho**2)) * zi[deterministic]
+        increment[deterministic] = drift*dt - .5*integrated + np.sqrt(integrated)*z_s
+    if np.all(deterministic):
+        return out, increment
+
     log_mgf = np.zeros_like(v)
     k1 = .5 * dt * (k * rho / xi - .5) - rho / xi
     k2 = .5 * dt * (k * rho / xi - .5) + rho / xi
     k3 = .5 * dt * (1. - rho**2)
     k4 = .5 * dt * (1. - rho**2)
     A = k2 + .5 * k4
-
-    # Degenerate/zero CIR variance and deterministic conditional moments.
-    deterministic = psi < 1e-12
-    out[deterministic] = m[deterministic]
-    log_mgf[deterministic] = A * m[deterministic]
 
     quadratic = (~deterministic) & (psi <= 1.5)
     if np.any(quadratic):
@@ -109,9 +122,11 @@ def _qe_m_step(v: NDArray[np.float64], zv: NDArray[np.float64],
         log_mgf[exponential] = np.log(p + (1. - p)*beta/(beta-A))
 
     # Conditional martingale correction (unlike uncorrected QE discretization).
-    var_conditional = np.maximum(k3*v + k4*out, 0.)
-    increment = (drift*dt + k1*v + k2*out - (k1+.5*k3)*v
-                 - log_mgf + np.sqrt(var_conditional)*zi)
+    general = ~deterministic
+    vg, og = v[general], out[general]
+    var_conditional = np.maximum(k3*vg + k4*og, 0.)
+    increment[general] = (drift*dt + k1*vg + k2*og - (k1+.5*k3)*vg
+                          - log_mgf[general] + np.sqrt(var_conditional)*zi[general])
     return out, increment
 
 

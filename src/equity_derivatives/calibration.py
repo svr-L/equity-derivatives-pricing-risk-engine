@@ -7,12 +7,14 @@ represents American ETF options as European observations.
 from __future__ import annotations
 
 import math
+import warnings
 from dataclasses import dataclass, field
 from typing import Sequence
 
 import numpy as np
 from scipy.optimize import least_squares
 
+from .heston_fourier import FourierAccuracyWarning
 from .heston_surface import heston_surface_prices
 from .models import EquityMarket, HestonParams
 from .carry import EquityCarryCurves
@@ -47,8 +49,9 @@ class CalibrationConfig:
     n_starts: int = 4
     seed: int = 2026
     max_nfev: int = 100
-    n_nodes: int = 96
-    integration_upper: float = 180.
+    # Fourier numerics: Gauss-Legendre nodes per panel; None = automatic truncation
+    n_nodes: int = 16
+    integration_upper: float | None = None
     vega_floor_frac_spot: float = 0.001
     # kappa, theta, vol-of-vol xi, rho, v0; these are priors, NOT Feller restrictions
     lower: tuple[float, ...] = (0.05, 0.0004, 0.01, -0.98, 0.0004)
@@ -187,8 +190,13 @@ def calibrate_heston(market: EquityMarket, quotes: Sequence[VanillaQuote], *,
     else:
         spread_weight = np.ones_like(price)
 
-    def predictions(x: np.ndarray) -> np.ndarray:
-        with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+    def predictions(x: np.ndarray, strict: bool = False) -> np.ndarray:
+        # strict=True (inside the optimizer): an inaccurate Fourier price is
+        # treated like a failed evaluation instead of being fitted.
+        with np.errstate(over="ignore", invalid="ignore", divide="ignore"), \
+                warnings.catch_warnings():
+            if strict:
+                warnings.simplefilter("error", FourierAccuracyWarning)
             return heston_surface_prices(market, _as_parameters(x), k, t, ic,
                                          n_nodes=config.n_nodes,
                                          integration_upper=config.integration_upper, carry_curves=carry_curves)
@@ -204,7 +212,7 @@ def calibrate_heston(market: EquityMarket, quotes: Sequence[VanillaQuote], *,
 
     def residuals(x: np.ndarray) -> np.ndarray:
         try:
-            pred = predictions(x)
+            pred = predictions(x, strict=True)
             if config.objective == "price":
                 err = (pred-price)/market.spot
             elif config.objective == "vega_scaled_price":
@@ -215,7 +223,7 @@ def calibrate_heston(market: EquityMarket, quotes: Sequence[VanillaQuote], *,
             if not np.all(np.isfinite(err)):
                 return np.full(len(price), 10.)
             return spread_weight*err
-        except (FloatingPointError, ArithmeticError, ValueError):
+        except (FloatingPointError, ArithmeticError, ValueError, FourierAccuracyWarning):
             return np.full(len(price), 10.)
 
     solutions = []
@@ -271,9 +279,12 @@ class FitEvaluation:
 
 def evaluate_heston_fit(market: EquityMarket, params: HestonParams,
                         quotes: Sequence[VanillaQuote], *,
-                        n_nodes: int = 128, integration_upper: float = 200.,
+                        n_nodes: int = 32, integration_upper: float | None = None,
                         carry_curves: EquityCarryCurves | None = None) -> FitEvaluation:
-    """Evaluate any nonempty holdout quote set without refitting parameters."""
+    """Evaluate any nonempty holdout quote set without refitting parameters.
+
+    Default quadrature uses twice the calibration's nodes per panel.
+    """
     quotes = tuple(quotes)
     if not quotes:
         raise ValueError("nonempty holdout quote set required")
