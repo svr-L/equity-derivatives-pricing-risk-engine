@@ -94,7 +94,7 @@ def main():
     selected=frame.loc[frame.contractSymbol.astype(str).isin({q.identifier for q in quotes})]
     arb=static_arbitrage_report(selected)
     payload={
-        'version':'0.4.0', 'source':source, 'snapshot_utc':report.snapshot_timestamp,
+        'version':'0.4.1', 'source':source, 'snapshot_utc':report.snapshot_timestamp,
         'ticker':report.ticker,'spot':market.spot,
         'flat_rate_assumption':(market.rate if curves is None else None),
         'flat_dividend_assumption':(market.dividend_yield if curves is None else None),
