@@ -140,3 +140,38 @@ are outside v0.2.
 - Term-structure implementation does not include scheduled cash dividends;
   American ETF exercise not handled; confidence intervals exclude model and
   discretization bias.
+
+## v0.4.1 numerical fixes and independent validation (2026-11-19)
+
+- `python -m pytest -q`: **190 passed** (86 prior + 104 new) in about 7 s.
+  Live QuantLib tests need QuantLib >= 1.32 and are skipped otherwise; the
+  embedded reference values need no extra package.
+- Heston European prices vs QuantLib `AnalyticHestonEngine` (AngledContour
+  contour, exp-sinh integration): 150 random parameter sets over the default
+  calibration box x 12 maturities (1 day to 10 years) x 7 strikes
+  (|log-moneyness| <= 0.5): maximum difference **3.6e-12 x spot**, no accuracy
+  warning. QuantLib's exp-sinh integration itself failed (NaN) in 5 of the
+  1800 maturity groups, which were excluded.
+- 18 reference prices from a 40-digit mpmath Lewis integral: QuantLib agrees
+  to <= 1.1e-13, the engine to about 2e-11 or better with the default
+  `rel_tol=1e-10`. Andersen (2008) case I gives 13.08467 (paper: 13.0847).
+- QuantLib's *default* Heston engine (Gatheral formula + Gauss–Lobatto) is not
+  a safe reference: against the 40-digit values it is off by up to 1.9e-5
+  (xi=0.01, kappa=15, v0=0.5, T=1) and 3.2e-6 (kappa*T about 118, T=10) on a
+  100 spot. The live tests therefore use the AngledContour configuration.
+- Calibration-box corners: the automatic cut-off reaches its 2**16 cap and
+  warns only for tiny v0 (0.0004) with xi=3 at short expiries (estimated error
+  up to about 1e-6 x spot); everywhere else no warning was raised.
+- v0.4.0 failure cases, before -> after: 7-day 105 call with xi=2, v0=0.01:
+  -0.00715 -> 2.24083e-5 (reference 2.24083e-5); Fourier with xi=1e-9:
+  0.84111 -> 7.36429 (BS 20%: 7.36429); QE-M ATM with xi=1e-7 (52 steps,
+  100k paths, seed 7): 5.151 -> 7.406 +/- 0.032, identical to the xi=0 run;
+  batch ATM price error vs QuantLib: +2.1e-4 -> about 1e-9.
+- Monte Carlo tests use several seeds and pooled standard errors: QE-M
+  European within 4 SE + 0.005 of the reference at 12 and 24 steps per year;
+  constant-volatility bridge unbiased within 4 SE; CRN bump delta, gamma and v0
+  sensitivity within 4 SE of QuantLib finite differences; Heston bridge
+  up-and-out call at 126 steps within 2% of QuantLib FdHestonBarrierEngine
+  (finest grid 4.3886, grid sensitivity about 0.005).
+- Performance: batch surface with 64 quotes over 8 expiries about 2 ms (v0.4.0:
+  0.8 ms); 65-quote calibration with 4 starts about 0.9 s (v0.4.0: 0.4 s).

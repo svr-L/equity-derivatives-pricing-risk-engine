@@ -60,3 +60,8 @@ run found a worst-case absolute European price difference of approximately
 0.0043 per share between 96-node/180 and 160-node/220 batch settings on the
 96 selected quotes, showing that numerical integration convergence is not
 zero, but is smaller than the observed ~0.6 price RMSE in this example.
+
+v0.4.1 note: the numbers on this page were produced with the v0.4.0 batch
+quadrature, which overpriced by about 2e-4 per 100 of spot (≈0.0016 at this
+spot). The v0.4.1 pricer agrees with QuantLib to about 4e-12 × spot; rerunning
+the example changes the fitted values only in the last digits.

@@ -50,13 +50,18 @@ objective variants and out-of-sample errors before drawing conclusions.
 
 ## Numerical pricer
 
-The new batch Heston Fourier pricer uses the same risk-neutral Lewis integral
-as `heston_fourier.heston_european`. It shares characteristic-function
-integrals across strikes of each maturity and evaluates them using fixed-order
-Gauss–Legendre quadrature (96 nodes up to 180 by default). This is very fast
-for calibration, but can introduce systematic pricing errors. Test alternative
-nodes / truncation cutoffs and cross-check against the original adaptive
-quadrature pricer (and ideally a distinct external implementation).
+The batch Heston Fourier pricer uses the same risk-neutral Lewis integral and,
+since v0.4.1, the same numerics as `heston_fourier.heston_european` (stable
+characteristic function, composite Gauss–Legendre panels, automatic per-expiry
+truncation; see METHODOLOGY.md). Characteristic-function evaluations are shared
+across strikes and batched across expiries. Against QuantLib over the whole
+default parameter box, maturities from 1 day to 10 years, prices agree to about
+4e-12 × spot. The v0.4.0 rule (96 nodes up to 180) overpriced by about 2e-4 per
+100 of spot and failed for short expiries with large vol-of-vol.
+
+Inside the optimizer a `FourierAccuracyWarning` is turned into a failed
+evaluation (penalty residuals), so an inaccurate price is never fitted; the
+warning is only shown if the final parameters themselves trigger it.
 
 Heston exotics continue to use the existing v0.1/v0.2 Monte Carlo engine and
 methods; the new calibration output is a `HestonParams` instance accepted by

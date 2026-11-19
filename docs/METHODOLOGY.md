@@ -39,7 +39,11 @@ squared Gaussian `a*(sqrt(b²)+Z)²`; choose `a,b²` to match `m,s2`. For
 `psi>1.5`, use a point mass at zero plus exponential tail, with
 `p=(psi-1)/(psi+1)`, `beta=(1-p)/m`. The required uniform for this branch
 is `Phi(z_variance)`, which preserves reproducible paired antithetic samples.
-Zero conditional variance is handled as a degenerate transition.
+For `psi < 1e-12` (zero conditional variance, or vol-of-vol so small that the
+transition is numerically deterministic) QE-M uses its `xi -> 0` limit:
+`v_next = m` and a Gaussian log-stock increment with the *full* trapezoidal
+integrated variance `I = (v + m)*h/2`, driven by `rho*Z_V + sqrt(1-rho²)*Z_I`
+(before v0.4.1 this branch lost the `rho²` share of the stock variance).
 
 Let `gamma1=gamma2=0.5` and define:
 
@@ -128,10 +132,27 @@ simulated paths when the conditional bridge estimator is used.
 ## Vanilla Heston Fourier pricing and implied volatility
 
 European vanilla pricing uses the Heston log-return characteristic function
-with the Lewis half-imaginary contour and numerical integration to a finite
-upper limit. Put-call parity gives puts; for `xi=0` the vanilla pricer uses
-Black-Scholes with exact deterministic integrated variance. Truncation and
-quadrature errors can matter for extreme parameters or maturities. Only
+with the Lewis half-imaginary contour. Put-call parity gives puts; for `xi=0`
+the vanilla pricer uses Black-Scholes with exact deterministic integrated
+variance. Numerics (v0.4.1, shared by scalar and batch pricers):
+
+- the little-trap characteristic function is evaluated with `a-d` (or `a+d`)
+  taken from `(a+d)(a-d) = -xi²(z²+iz)` and the logarithm as a `log1p`, so it
+  has no cancellation as `xi -> 0` and is continuous with the `xi=0` formula;
+- composite Gauss–Legendre quadrature (16 nodes per panel): panels start at
+  width 0.5 and double, resolving the `1/(u²+1/4)` peak at `u=0`, and are capped
+  so that the integrand's phase changes by at most 10 radians per panel (phase
+  rate = log-moneyness plus the measured phase rate of `phi`);
+- the cut-off `U` is the smallest point of a `sqrt(2)`-spaced grid beyond which
+  `|phi(u-i/2)|/u` keeps below `rel_tol*spot` divided by the price scale
+  `exp(-rT)*sqrt(S*K_max)/pi` (bound on the neglected tail), capped at `2**16`;
+- a `FourierAccuracyWarning` is issued when the estimated truncation error or a
+  violation of `max(S e^{-qT} - K e^{-rT}, 0) <= C <= S e^{-qT}` exceeds
+  `1000*rel_tol*spot`. This happens only for very slowly decaying
+  characteristic functions (tiny `v0` with vol-of-vol near 3 and short
+  expiries) or when a too small `integration_upper` is forced.
+
+Only
 **vanilla** price-to-Black-IV inversion is supported; reporting an exotic's
 Black IV as a model calibration target is not generally well-defined.
 
