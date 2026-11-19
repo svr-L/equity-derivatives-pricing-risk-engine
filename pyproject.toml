@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "equity-derivatives-pricing-risk-engine"
-version = "0.4.0"
+version = "0.4.1"
 description = "Standalone Heston equity derivatives pricing, risk, IV-surface calibration and option-snapshot adapters and deterministic carry curves"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -13,7 +13,7 @@ authors = [{name = "Saverio Lauriola"}]
 dependencies = ["numpy>=1.26", "scipy>=1.11"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.5"]
+dev = ["pytest>=8", "ruff>=0.5", "QuantLib>=1.32"]
 marketdata = ["pandas>=2.0", "pyarrow>=14"]
 
 [tool.setuptools.packages.find]
@@ -23,6 +23,9 @@ where = ["src"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-ra"
+# An inaccurate Fourier price must never pass silently in the test suite;
+# tests that expect the warning use pytest.warns.
+filterwarnings = ["error::equity_derivatives.heston_fourier.FourierAccuracyWarning"]
 
 [tool.ruff]
 line-length = 100

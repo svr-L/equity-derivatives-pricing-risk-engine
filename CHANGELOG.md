@@ -1,3 +1,59 @@
+## v0.4.1 — Fourier and QE-M numerical fixes, QuantLib validation (2026-11-19)
+
+### Fixed
+
+- **Batch Heston pricer bias** (`heston_surface_prices`, used by calibration):
+  the single 96-node Gauss–Legendre rule on [0, 180] under-resolved the
+  `1/(u²+1/4)` peak of the Lewis integrand and overpriced every option by
+  about 2e-4 per 100 of spot. Replaced by composite Gauss–Legendre panels
+  (16 nodes each) that start at width 0.5 near `u=0` and are capped in width
+  by the phase rate of the integrand.
+- **Fourier truncation**: the fixed cut-offs (200 scalar, 180 batch) were too
+  short for short expiries with large vol-of-vol (errors up to 1e-2 and
+  negative prices, e.g. a 7-day 105 call at −0.007 instead of +0.00002). The
+  cut-off is now chosen per maturity from the decay of `|phi(u−i/2)|`
+  (target error `rel_tol*spot`, default 1e-10, cap 2**16). Scalar and batch
+  pricers share the same numerics.
+- **Small vol-of-vol in the characteristic function**: `(a−d)/xi²` and the
+  little-trap logarithm are evaluated without cancellation (xi=1e-9 gave 0.84
+  instead of 7.36). Continuous with the exact `xi=0` case.
+- **QE-M degenerate branch** (`psi < 1e-12`, e.g. xi below ~1e-6 with daily
+  steps) kept `v_next = m` but lost the rho² share of the stock variance
+  (ATM 5.15 instead of 7.36 at rho=−0.7). It now uses the xi→0 limit of QE-M:
+  full trapezoidal integrated variance, correlated with `z_variance`.
+- `heston_log_return_cf(-1j, ...)` returned NaN when `kappa < rho*xi`.
+
+### Changed
+
+- New exported `FourierAccuracyWarning`: issued when the estimated truncation
+  error or a static no-arbitrage bound violation exceeds `1000*rel_tol*spot`.
+  Non-finite values raise `FloatingPointError`. Inside calibration such
+  evaluations are treated as failed (penalty residuals), never fitted.
+- `heston_european(..., integration_upper=None, n_nodes=16, rel_tol=1e-10)`:
+  `None` = automatic cut-off, a float fixes it (and is still checked).
+  `epsabs` is ignored and deprecated.
+- `heston_surface_prices(..., n_nodes=16, integration_upper=None, rel_tol=1e-10)`:
+  `n_nodes` now counts Gauss–Legendre nodes **per panel**.
+- `CalibrationConfig` defaults `n_nodes=16, integration_upper=None`;
+  `evaluate_heston_fit` defaults `n_nodes=32, integration_upper=None`.
+- Batch pricing is about 2.5x slower (≈2 ms for 64 quotes over 8 expiries)
+  and calibration about 2x; batch prices move by about −2e-4 per 100 of spot,
+  so calibration outputs change in the last digits (EMPIRICAL_SPY.md numbers
+  were produced with v0.4.0). Synthetic recovery IV RMSE drops from
+  0.0012/0.0036 to below 0.0001 vol points.
+
+### Tests (86 → 190)
+
+- Reference prices from a 40-digit mpmath Lewis integral cross-checked with
+  QuantLib (incl. the v0.4.0 failure cases and Andersen 2008 case I), QuantLib
+  barrier values; generator in `tests/reference_generator.py`.
+- Live QuantLib comparisons over the calibration box, with dated curves and for
+  BS barriers (skipped if QuantLib is absent; QuantLib added to `dev` extra).
+- Fourier robustness, QE-M small-xi, Monte Carlo accuracy with multi-seed
+  statistical tolerances, calibration recovery from the default start (not the
+  truth). `FourierAccuracyWarning` is an error in the test suite; two v0.4.0
+  tolerances tightened (batch vs scalar 2e-3 → 1e-8; MC vs Fourier +0.2 → +0.02).
+
 ## v0.4.0 — dated market curves and point-in-time history (2026-11-14)
 
 - Added `DiscountCurve` and `EquityCarryCurves`, continuous proportional
