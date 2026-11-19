@@ -26,7 +26,9 @@ def test_vectorized_fourier_matches_scalar(synthetic_surface):
     m, p, k, t, calls, prices, _ = synthetic_surface
     slow = np.array([heston_european(m, p, float(a), float(b), bool(c))
                      for a, b, c in zip(k, t, calls)])
-    assert np.max(np.abs(prices - slow)) < 0.002
+    # v0.4.1: both target rel_tol*spot = 1e-8 (v0.4.0 tolerance 0.002 hid a
+    # systematic +2e-4 bias of the 96-node batch rule)
+    assert np.max(np.abs(prices - slow)) < 1e-8
 
 
 def test_input_broadcast_and_deterministic_variance():

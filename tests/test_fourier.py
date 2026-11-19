@@ -47,8 +47,9 @@ def test_heston_mc_vs_heston_fourier():
     p = HestonParams(2, .04, .5, -.7, .04)
     mc = price_mc(m, p, European(100), MCConfig(1, 150, 12000, 2026))
     exact = heston_european(m, p, 100, 1)
-    # A Monte Carlo statistical comparison, with tolerance for FT Euler time bias.
-    assert abs(mc.price - exact) <= 4 * mc.stderr + .2
+    # A Monte Carlo statistical comparison, with tolerance for FT Euler time bias
+    # (about +0.005 at 150 steps for these parameters; was +0.2 before v0.4.1).
+    assert abs(mc.price - exact) <= 4 * mc.stderr + .02
 
 
 def test_fourier_integration_boundary_stability_for_standard_case():
